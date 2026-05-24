@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sonic Deconstruction | The Wall of Sound</title>
+    <style>
+        /* ==========================================================================
+           1. MINIMALIST UI ARCHITECTURE (The "High-End" Shell)
+           ========================================================================== */
+        :root {
+            --bg-color: #030303;
+            --text-color: rgba(255, 255, 255, 0.7);
+            --color-1: #00f3ff; /* Cyan */
+            --color-2: #ff003c; /* Magenta */
+            --color-3: #ffde00; /* Yellow */
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body, html {
+            width: 100vw; height: 100vh;
+            background-color: var(--bg-color);
+            overflow: hidden;
+            font-family: 'Helvetica Neue', Helvetica, Inter, sans-serif;
+            color: var(--text-color);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 层级 0：底层氛围呼吸背景 */
+        #layer-void {
+            position: fixed; inset: -15%; z-index: 0;
+            background: radial-gradient(circle at 50% 50%, #1a1a1a 0%, #000 100%);
+            transition: transform 0.1s ease-out, background 2s ease;
+        }
+
+        /* 层级 1：视觉主画布 (这是绚烂混乱的刑场) */
+        #visuals-canvas {
+            position: absolute; inset: 0; z-index: 5;
+            mix-blend-mode: screen; /* 核心：让所有轨道发光并叠加 */
+        }
+
+        /* 层级 2：UI 状态机面板 */
+        #layer-ui {
+            position: absolute; inset: 0; z-index: 10;
+            display: grid; grid-template-rows: 100px 1fr 100px; padding: 3vw;
+            pointer-events: none; /* 让鼠标穿透，驱动 Canvas 交互 */
+        }
+
+        /* 左上角极简指示器 ( lowercase + Helvetica ) */
+        #stage-indicator {
+            font-size: 11px; letter-spacing: 5px; text-transform: uppercase;
+            font-weight: 300; opacity: 0.4;
+        }
+
+        /* 底部自由导航控制台 (平时极度透明) */
+        #controls-wrapper {
+            grid-row: 3; align-self: flex-end; display: flex;
+            justify-content: center; gap: 40px; pointer-events: auto;
+        }
+
+        .sys-btn {
+            background: transparent; border: none; color: #fff;
+            font-size: 20px; cursor: pointer; opacity: 0.3;
+            transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); outline: none;
+        }
+        .sys-btn:hover { opacity: 1; transform: scale(1.1); }
+        .sys-btn.active-run { border-color: var(--color-1); color: var(--color-1); }
+        .sys-btn.active-run:hover { box-shadow: 0 0 20px var(--color-1); }
+
+        /* 进度走带时间线 */
+        #time-line-container {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 2px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        #time-progress {
+            height: 100%; background: #fff; width: 0%;
+            transition: width 0.1s linear;
+        }
+
+    </style>
+</head>
+<body>
+
+    <audio id="audio-engine" crossorigin="anonymous"></audio>
+    <div id="layer-void"></div>
+    <canvas id="visuals-canvas"></canvas>
+
+    <div id="layer-ui">
+        <div id="stage-indicator">Stage 00 // Genesis</div>
+        
+        <div id="controls-wrapper">
+            <button class="sys-btn" id="btn-prev">◁</button>
+            <button class="sys-btn active-run" id="btn-play">▶</button>
+            <button class="sys-btn" id="btn-next">▷</button>
+        </div>
+    </div>
+    
+    <div id="time-line-container"><div id="time-progress"></div></div>
+
+    <script>
+        // GLOBAL NAMESPACE INITIATION
+        window.SD = { Config: {}, UI: {}, Audio: {}, Renderers: [], Slicer: {} };
+/* ==========================================================================
+           PART 2/3: THE WALL OF SOUND & MULTI-TRACK GLITCH ALGORITHMS
+           ========================================================================== */
+
+        // 1. 核心数学与物理引擎 (Math & Physics Kernel)
+        const M = {
+            map: (v, x1, y1, x2, y2) => (v - x1) * (y2 - x2) / (y1 - x1) + x2,
+            lerp: (a, b, t) => a + (b - a) * t,
+            dist: (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1),
+            clamp: (val, min, max) => Math.max(min, Math.min(max, val)),
+            // 伪三维极坐标转换
+            toCartesian: (r, angle) => ({ x: r * Math.cos(angle), y: r * Math.sin(angle) })
+        };
+
+        // 原生极速伪随机噪声发生器 (替代沉重的外部库)
+        const FastNoise = {
+            seed: Math.random(),
+            hash(n) { let h = n * 374761393 + this.seed * 3284157443; h = (h ^ (h >> 15)) * 22695477; return (h ^ (h >> 13)) / 4294967296; },
+            noise(x, y, z) {
+                return Math.sin(x * 0.05 + this.hash(y) * Math.PI) * Math.cos(y * 0.05 + z) + Math.sin(z * 0.1);
+            }
+        };
+
+        // 2. 调色板：绚烂且高级的迷幻色阶 (电光紫、霓虹粉、日落黄)
+        const PALETTE = [
+            'rgba(255, 0, 60, 0.4)',   // Magenta/Red
+            'rgba(0, 243, 255, 0.4)',  // Cyan
+            'rgba(123, 0, 255, 0.4)',  // Electric Purple
+            'rgba(255, 222, 0, 0.4)'   // Neon Yellow
+        ];
+
+        /* ==========================================================================
+           3. THE 7 RENDER ENGINES (独立视觉类，每一阶对应一种解构手法)
+           ========================================================================== */
+
+        // --- STAGE 0: THE SEED (原始素材的多轨可视化：干净、顺滑) ---
+        class EngineGenesis {
+            constructor(w, h) {
+                this.resize(w, h);
+                this.tracks = 12; // 模拟 12 轨干声原始分离
+                this.time = 0;
+            }
+            resize(w, h) { this.w = w; this.h = h; }
+            draw(ctx, A) {
+                // 保留高级的呼吸感残影
+                ctx.fillStyle = `rgba(3, 3, 3, ${0.15 - A.vol * 0.05})`; ctx.fillRect(0, 0, this.w, this.h);
+                ctx.globalCompositeOperation = 'screen';
+                
+                this.time += 0.01;
+                let stepY = this.h / (this.tracks + 2);
+                
+                for(let t = 0; t < this.tracks; t++) {
+                    ctx.beginPath();
+                    let colorIdx = t % PALETTE.length;
+                    ctx.strokeStyle = PALETTE[colorIdx].replace('0.4', `${0.3 + A.vol}`);
+                    ctx.lineWidth = 1 + A.bass * 2;
+                    
+                    let yOffset = stepY * (t + 1);
+                    // 从 FFT 中切片出属于该“轨道”的频率数据
+                    let sliceStart = Math.floor((t / this.tracks) * A.dataFreq.length);
+                    
+                    for(let i = 0; i < this.w; i += 5) {
+                        let dataIdx = sliceStart + Math.floor((i / this.w) * (A.dataFreq.length / this.tracks));
+                        let f = (A.dataFreq[dataIdx] || 0) / 255;
+                        
+                        let wave = Math.sin(this.time * (t + 1) + i * 0.01) * 20;
+                        let y = yOffset + wave + (f * 50 * (1 + A.rms)) * (i % 2 === 0 ? 1 : -1);
+                        
+                        if(i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+                    }
+                    ctx.stroke();
+                }
+                ctx.globalCompositeOperation = 'source-over';
+            }
+        }
+        window.SD.Renderers.push(EngineGenesis);
+
+        // --- STAGE 1: MULTITRACK BLEED (多轨开始杂乱混合与渗透) ---
+        class EngineMultitrackBleed {
+            constructor(w, h) { this.resize(w, h); this.time = 0; }
+            resize(w, h) { this.w = w; this.h = h; }
+            draw(ctx, A) {
+                ctx.fillStyle = `rgba(5, 5, 5, ${0.1 - A.rms*0.05})`; ctx.fillRect(0, 0, this.w, this.h);
+                ctx.globalCompositeOperation = 'screen';
+                this.time += 0.02 + A.rms * 0.1;
+                
+                const layers = 24; // 轨道数量翻倍，开始互相堆叠
+                let cy = this.h / 2;
+                
+                for(let t = 0; t < layers; t++) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = PALETTE[t % PALETTE.length].replace('0.4', `${0.1 + A.flux * 2}`);
+                    ctx.lineWidth = 2;
+                    
+                    let spread = (t - layers/2) * (10 + A.bass * 50); // 低音将轨道暴力推开
+                    
+                    for(let i = 0; i < this.w; i += 10) {
+                        let f = A.dataFreq[(i + t*10) % A.dataFreq.length] / 255;
+                        let noise = FastNoise.noise(i * 0.01, t * 0.1, this.time);
+                        
+                        // 轨道由于 AI 误读开始产生剧烈的纵向畸变
+                        let y = cy + spread + (noise * 100 * A.vol) + (f * this.h * 0.3 * (1 + A.flux));
+                        if(i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+                    }
+                    ctx.stroke();
+                }
+                ctx.globalCompositeOperation = 'source-over';
+            }
+        }
+        window.SD.Renderers.push(EngineMultitrackBleed);
+
+        // --- STAGE 2: PIXEL SORTING (AI 非人化：像素重排与色差) ---
+        class EnginePixelSort {
+            constructor(w, h) { this.resize(w, h); this.buffer = document.createElement('canvas'); this.bCtx = this.buffer.getContext('2d', {willReadFrequently: true}); }
+            resize(w, h) { this.w = this.buffer.width = w; this.h = this.buffer.height = h; }
+            draw(ctx, A) {
+                // 继承主画布数据
+                this.bCtx.drawImage(ctx.canvas, 0, 0);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.05)'; ctx.fillRect(0, 0, this.w, this.h);
+                
+                // 绘制极度失真的巨型光带
+                ctx.globalCompositeOperation = 'screen';
+                for(let i=0; i<3; i++) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = PALETTE[i]; ctx.lineWidth = 50 + A.rms * 100;
+                    for(let x=0; x<this.w; x+=20) {
+                        let y = this.h/2 + Math.sin(x*0.01 + A.rms*10 + i) * 300 * A.vol;
+                        if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+                    }
+                    ctx.stroke();
+                }
+                ctx.globalCompositeOperation = 'source-over';
+
+                // 核心故障：基于瞬态节拍进行物理数据弯曲 (Data Bending)
+                if (A.isBeat || A.flux > 0.3) {
+                    let sliceY = Math.random() * this.h;
+                    let sliceH = 100 * A.flux + 10;
+                    let imgData = ctx.getImageData(0, sliceY, this.w, sliceH);
+                    
+                    // 模拟像素排序的错乱：RGB通道强行移位
+                    for (let j = 0; j < imgData.data.length; j += 4) {
+                        if (Math.random() > 0.9) {
+                            imgData.data[j] = imgData.data[j+1]; // R = G
+                            imgData.data[j+2] = 255;             // B 满载 (造成强烈色差)
+                        }
+                    }
+                    
+                    // 横向错位切割
+                    let xOffset = (Math.random() - 0.5) * this.w * A.flux * 2;
+                    ctx.putImageData(imgData, xOffset, sliceY + (Math.random()-0.5)*20);
+                }
+            }
+        }
+        window.SD.Renderers.push(EnginePixelSort);
+
+        // --- STAGE 3: SHOEGAZE WALL (声墙过载：极致绚烂的叠加) ---
+        class EngineShoegazeWall {
+            constructor(w, h) { this.resize(w, h); this.time = 0; }
+            resize(w, h) { this.w = w; this.h = h; }
+            draw(ctx, A) {
+                // 不再清空背景，让颜色无限叠加液化
+                ctx.fillStyle = `rgba(0, 0, 0, ${0.02 - A.vol * 0.01})`; ctx.fillRect(0, 0, this.w, this.h);
+                ctx.globalCompositeOperation = 'lighter'; // 终极发光混合
+                
+                this.time += 0.1;
+                const bands = 128; // 超高密度的频带线条
+                let barW = this.w / bands;
+                
+                for(let i=0; i<bands; i++) {
+                    let f = A.dataFreq[i*4] / 255; // 采样
+                    if(f < 0.1) continue;
+                    
+                    let h = f * this.h * (0.5 + A.rms * 2);
+                    let color = PALETTE[i % PALETTE.length].replace('0.4', `${f}`);
+                    
+                    ctx.fillStyle = color;
+                    // 上下同时生长，形成声墙矩阵
+                    ctx.fillRect(i * barW, this.h/2 - h/2, barW * (1 + A.flux), h);
+                    
+                    // 动态发光粒子随高频迸发
+                    if (A.treble > 0.5 && Math.random() > 0.8) {
+                        ctx.beginPath();
+                        ctx.arc(i * barW, this.h/2 + (Math.random()-0.5)*h, f*10, 0, Math.PI*2);
+                        ctx.fill();
+                    }
+                }
+                ctx.globalCompositeOperation = 'source-over';
+                
+                // 极致爆闪
+                if (A.isBeat) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${A.flux})`;
+                    ctx.fillRect(0, 0, this.w, this.h);
+                }
+            }
+        }
+        window.SD.Renderers.push(EngineShoegazeWall);
+
+        // --- STAGE 4: CHAOTIC NEURAL NET (AI 训练节点的崩溃) ---
+        class EngineNeuralTear {
+            constructor(w, h) {
+                this.resize(w, h);
+                this.nodes = [];
+                for(let i=0; i<200; i++) this.nodes.push({x: Math.random()*w, y: Math.random()*h, vx: 0, vy: 0});
+            }
+            resize(w, h) { this.w = w; this.h = h; }
+            draw(ctx, A) {
+                ctx.fillStyle = `rgba(2, 2, 2, ${0.1 - A.rms*0.05})`; ctx.fillRect(0, 0, this.w, this.h);
+                ctx.globalCompositeOperation = 'screen';
+                
+                for(let i=0; i<this.nodes.length; i++) {
+                    let n = this.nodes[i];
+                    let f = A.dataFreq[i % A.dataFreq.length] / 255;
+                    
+                    // AI 节点受到极端增益干扰，产生无序震荡
+                    n.vx += (Math.random() - 0.5) * f * 50;
+                    n.vy += (Math.random() - 0.5) * f * 50;
+                    n.x += n.vx; n.y += n.vy;
+                    n.vx *= 0.8; n.vy *= 0.8; // 强阻尼
+                    
+                    if(n.x<0) n.x=this.w; if(n.x>this.w) n.x=0; if(n.y<0) n.y=this.h; if(n.y>this.h) n.y=0;
+                }
+                
+                ctx.lineWidth = 1;
+                for(let i=0; i<this.nodes.length; i++) {
+                    for(let j=i+1; j<this.nodes.length; j++) {
+                        let d = M.dist(this.nodes[i].x, this.nodes[i].y, this.nodes[j].x, this.nodes[j].y);
+                        // 当距离超过阈值时，连线断裂；瞬态下阈值发生突变
+                        let threshold = 100 + A.bass * 200;
+                        if(d < threshold) {
+                            ctx.beginPath(); ctx.moveTo(this.nodes[i].x, this.nodes[i].y); ctx.lineTo(this.nodes[j].x, this.nodes[j].y);
+                            ctx.strokeStyle = `rgba(0, 243, 255, ${1 - d/threshold})`;
+                            
+                            // 高频过载时，神经连线变成刺眼的红色
+                            if (A.treble > 0.6 && Math.random() > 0.9) {
+                                ctx.strokeStyle = `rgba(255, 0, 60, ${1 - d/threshold + A.flux})`;
+                                ctx.lineWidth = 3;
+                            } else {
+                                ctx.lineWidth = 1;
+                            }
+                            ctx.stroke();
+                        }
+                    }
+                }
+                ctx.globalCompositeOperation = 'source-over';
+            }
+        }
+        window.SD.Renderers.push(EngineNeuralTear);
+
+        // --- STAGE 5: THE FINAL ERROR (彻底的黑白反转与系统故障) ---
+        class EngineFinalError {
+            constructor(w, h) { this.resize(w, h); this.time = 0; }
+            resize(w, h) { this.w = w; this.h = h; }
+            draw(ctx, A) {
+                // 默认黑底，瞬态时完全反相为白底，极致刺眼
+                let isError = A.isBeat || A.flux > 0.4;
+                ctx.fillStyle = isError ? '#ffffff' : 'rgba(5,5,5,0.2)'; 
+                ctx.fillRect(0, 0, this.w, this.h);
+                
+                this.time += 0.1;
+                ctx.globalCompositeOperation = isError ? 'difference' : 'screen';
+                
+                // 绘制极度放大的块状错误波形
+                const bands = 32;
+                const bW = this.w / bands;
+                for(let i=0; i<bands; i++) {
+                    let f = A.dataFreq[i*10] / 255;
+                    ctx.fillStyle = PALETTE[Math.floor(Math.random()*PALETTE.length)];
+                    let h = f * this.h;
+                    
+                    // 巨型色块故障
+                    ctx.fillRect(i * bW, this.h/2 - h/2 + (Math.random()-0.5)*100*A.flux, bW, h);
+                }
+                ctx.globalCompositeOperation = 'source-over';
+                
+                // 暴戾的画面横向撕裂重组
+                if (A.rms > 0.3) {
+                    let cuts = Math.floor(A.rms * 20);
+                    for(let c=0; c<cuts; c++) {
+                        let cy = Math.random() * this.h, ch = Math.random() * 50;
+                        let img = ctx.getImageData(0, cy, this.w, ch);
+                        ctx.putImageData(img, (Math.random()-0.5)*this.w*A.vol, cy);
+                    }
+                }
+            }
+        }
+        window.SD.Renderers.push(EngineFinalError);
+
+        // --- STAGE 6: THE ASH VOID (一切归于深渊) ---
+        class EngineAshVoid {
+            constructor(w, h) {
+                this.resize(w, h);
+                this.ash = [];
+                for(let i=0; i<5000; i++) this.ash.push({x: Math.random()*w, y: Math.random()*h, s: Math.random()*3+1});
+            }
+            resize(w, h) { this.w = w; this.h = h; }
+            draw(ctx, A) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.fillRect(0, 0, this.w, this.h); // 极度吞噬感
+                
+                ctx.fillStyle = `rgba(255, 255, 255, ${0.4 + A.vol})`;
+                for(let p of this.ash) {
+                    // 灰烬缓慢上浮
+                    p.y -= p.s * (1 + A.bass);
+                    p.x += Math.sin(p.y * 0.05) * 0.5;
+                    
+                    // 鼓点打下时，灰烬被声波强行吹散
+                    if(A.isBeat) { p.x += (Math.random()-0.5)*50; p.y += (Math.random()-0.5)*50; }
+                    
+                    if(p.y < 0) { p.y = this.h; p.x = Math.random()*this.w; }
+                    ctx.fillRect(p.x, p.y, 1.5, 1.5);
+                }
+            }
+        }
+        window.SD.Renderers.push(EngineAshVoid);
+/* ==========================================================================
+           PART 3/3: THE MASTER CONTROLLER & AUDIO KERNEL
+           ========================================================================== */
+        
+        const TRACKS = [
+            'DevilsWords_Preview.mp3', 'devilsword1.mp3', 'devilsword2.mp3', 
+            'devilsword3.mp3', 'devilsword4.mp3', 'devilsword5.mp3', 'devilsword6.mp3'
+        ];
+        
+        const STAGE_LABELS = [
+            "Genesis // Origin", 
+            "Multitrack Bleed", 
+            "Pixel Sorting // Misuse", 
+            "Shoegaze // Wall of Sound", 
+            "Neural Tear // NAM Overload", 
+            "Final Error // Inversion", 
+            "Ash Void // Decay"
+        ];
+
+        const ENGINES = window.SD.Renderers;
+
+        const DOM = {
+            audio: document.getElementById('audio-engine'),
+            cvs: document.getElementById('visuals-canvas'),
+            ctx: document.getElementById('visuals-canvas').getContext('2d', {alpha: false, willReadFrequently: true}),
+            bg: document.getElementById('layer-void'),
+            btnPlay: document.getElementById('btn-play'),
+            btnPrev: document.getElementById('btn-prev'),
+            btnNext: document.getElementById('btn-next'),
+            indicator: document.getElementById('stage-indicator'),
+            progFill: document.getElementById('time-progress')
+        };
+
+        let currentStage = 0;
+        let activeEngine = null;
+        let rafID = null;
+        let W = window.innerWidth, H = window.innerHeight;
+
+        function resize() {
+            W = DOM.cvs.width = window.innerWidth;
+            H = DOM.cvs.height = window.innerHeight;
+            if(activeEngine && activeEngine.resize) activeEngine.resize(W, H);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- 核心音频信号处理器 (Signal Extraction) ---
+        const AudioKernel = {
+            ctx: null, analyser: null, source: null,
+            dataFreq: null, dataTime: null, prevFreq: null,
+            vol: 0, bass: 0, treble: 0, rms: 0, flux: 0, isBeat: false, lastBass: 0,
+            
+            init() {
+                if(this.ctx) return;
+                const AC = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AC();
+                this.analyser = this.ctx.createAnalyser();
+                this.analyser.fftSize = 2048; // 极高精度，支撑多轨渲染
+                this.analyser.smoothingTimeConstant = 0.4; // 降低平滑，凸显 Glitch 的神经质
+                
+                this.dataFreq = new Uint8Array(this.analyser.frequencyBinCount);
+                this.dataTime = new Float32Array(this.analyser.frequencyBinCount);
+                this.prevFreq = new Uint8Array(this.analyser.frequencyBinCount);
+                
+                this.source = this.ctx.createMediaElementSource(DOM.audio);
+                this.source.connect(this.analyser);
+                this.analyser.connect(this.ctx.destination);
+            },
+            
+            update() {
+                if(!this.analyser) return;
+                // 保存上一帧数据用于 Spectral Flux 突变计算
+                this.prevFreq.set(this.dataFreq);
+                this.analyser.getByteFrequencyData(this.dataFreq);
+                this.analyser.getFloatTimeDomainData(this.dataTime);
+                
+                let sum = 0, rmsSq = 0, bassSum = 0, trebSum = 0, fluxSum = 0;
+                let len = this.dataFreq.length;
+                let mid = Math.floor(len / 2);
+                
+                for(let i=0; i<len; i++) {
+                    let val = this.dataFreq[i];
+                    sum += val;
+                    rmsSq += this.dataTime[i] * this.dataTime[i];
+                    
+                    if(i < 15) bassSum += val; // 更严格的低音切片
+                    if(i > mid) trebSum += val;
+                    
+                    // Spectral Flux: 捕捉频率突变 (极度精准的 Glitch 触发器)
+                    let diff = val - this.prevFreq[i];
+                    if(diff > 0) fluxSum += diff;
+                }
+                
+                this.vol = (sum / len) / 255;
+                this.rms = Math.sqrt(rmsSq / len);
+                this.bass = (bassSum / 15) / 255;
+                this.treble = (trebSum / (len - mid)) / 255;
+                
+                // 放大 Flux，使其对底噪和鼓点极度敏感
+                this.flux = Math.pow((fluxSum / len) / 255, 2) * 8;
+                
+                // 瞬态检测：捕捉重低音打点
+                this.isBeat = (this.bass > 0.65 && this.bass > this.lastBass + 0.05);
+                this.lastBass = this.bass;
+            }
+        };
+
+        // --- 硬件级渲染主循环 ---
+        function systemLoop() {
+            rafID = requestAnimationFrame(systemLoop);
+            if (!AudioKernel.analyser || DOM.audio.paused) return;
+
+            AudioKernel.update();
+
+            // 将瞬态参数抛给底层画布进行物理空间层面的畸变
+            DOM.bg.style.transform = `scale(${1 + AudioKernel.bass * 0.05}) rotate(${AudioKernel.flux * 2}deg)`;
+
+            // 驱动当前的独立视觉引擎
+            if (activeEngine) activeEngine.draw(DOM.ctx, AudioKernel);
+        }
+
+        // --- 终局学术展板呈现 (The Academic Manifesto) ---
+        function showManifesto() {
+            cancelAnimationFrame(rafID);
+            DOM.audio.pause();
+            
+            // 彻底销毁渲染层，恢复纯黑原生滚动网页
+            document.body.innerHTML = '';
+            document.body.style.backgroundColor = '#000';
+            document.body.style.overflowY = 'auto';
+            document.body.style.cursor = 'default';
+            
+            const manifestoHTML = `
+            <div style="padding: 15vh 10vw; max-width: 800px; margin: 0 auto; color: #aaa; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; line-height: 2.2; font-weight: 300; font-size: 14px; letter-spacing: 0.5px;">
+                <h1 style="color: #fff; font-size: 22px; font-weight: 400; letter-spacing: 4px; margin-bottom: 60px; text-transform: uppercase;">Sonic Deconstruction</h1>
+                
+                <p style="margin-bottom: 30px;">This project documents the algorithmic degradation of a structured pop arrangement, mathematically mapping the trajectory from sterile clarity to complete sonic disintegration.</p>
+                
+                <p style="margin-bottom: 30px;"><strong style="color:#fff; font-weight:500;">Source Material:</strong> The foundational stems (Stage 00) are sourced from the <a href="https://cambridge-mt.com/ms3/mtk/#Pop" target="_blank" style="color:#777; text-decoration:none; border-bottom:1px solid #444;">Cambridge Music Technology</a> educational library. To avoid copyright infringement while rigorously testing these concepts, I utilized these freely available, professionally mixed multitracks as a pristine control sample before initiating the destruction process.</p>
+                
+                <p style="margin-bottom: 30px;"><strong style="color:#fff; font-weight:500;">Implementation & Methodology:</strong> The subsequent six stages are the result of deliberate algorithmic misuse. Rather than employing artificial intelligence as a generative aid, I utilized it strictly as a mechanism for acoustic decay. Human vocal and melodic stems were processed through Neutone (RAVE neural network models) trained on fundamentally incompatible textures. This forced the AI to critically misinterpret human breath and phrasing, yielding cold, metallic, non-human artifacts.</p>
+                
+                <p style="margin-bottom: 30px;">To compound the degradation, Neural Amp Modeler (NAM)—a tool engineered for guitar circuit emulation—was applied across the master bus. By driving the gain beyond intended operational limits, the system's inherent digital noise floor was isolated and aggressively amplified, ultimately suffocating the original harmony beneath a dense wall of sound reminiscent of extreme Shoegaze.</p>
+
+                <p style="margin-bottom: 30px;"><strong style="color:#fff; font-weight:500;">Visual Rendering:</strong> The visual layer is not pre-rendered video. It is generated entirely in real-time via the Web Audio API. The HTML5 Canvas algorithms calculate spectral flux, root mean square (RMS) amplitude, and bass transients to drive multi-track waveform overlapping, pixel sorting, and geometric fracturing. The code physically mirrors the audio's collapse into a digital void.</p>
+            </div>`;
+            
+            document.body.innerHTML = manifestoHTML;
+            // 渐显动画
+            document.body.style.opacity = 0;
+            setTimeout(() => { document.body.style.transition = 'opacity 3s ease'; document.body.style.opacity = 1; }, 100);
+        }
+
+        // --- 全局状态加载器 ---
+        function loadStage(index) {
+            if (index < 0) index = 0;
+            if (index >= TRACKS.length) { showManifesto(); return; }
+
+            currentStage = index;
+            DOM.indicator.innerText = `Stage 0${currentStage} // ${STAGE_LABELS[currentStage]}`;
+
+            activeEngine = new ENGINES[currentStage](W, H);
+            
+            DOM.audio.src = TRACKS[currentStage];
+            DOM.audio.volume = (currentStage === 0) ? 0.3 : 1.0;
+            
+            DOM.ctx.clearRect(0, 0, W, H);
+            DOM.audio.play();
+            
+            DOM.btnPlay.innerText = '⏸';
+            if (!rafID) systemLoop();
+        }
+
+        /* ==========================================================================
+           EVENT ROUTERS
+           ========================================================================== */
+        DOM.btnPlay.addEventListener('click', () => {
+            AudioKernel.init();
+            if (AudioKernel.ctx.state === 'suspended') AudioKernel.ctx.resume();
+
+            if (DOM.audio.paused) {
+                if (!activeEngine) loadStage(0); else DOM.audio.play();
+                DOM.btnPlay.innerText = '⏸';
+                systemLoop();
+            } else {
+                DOM.audio.pause();
+                DOM.btnPlay.innerText = '▶';
+                cancelAnimationFrame(rafID); rafID = null;
+            }
+        });
+
+        DOM.btnPrev.addEventListener('click', () => { if (currentStage > 0) loadStage(currentStage - 1); });
+        DOM.btnNext.addEventListener('click', () => { loadStage(currentStage + 1); });
+
+        DOM.audio.addEventListener('timeupdate', () => {
+            if (DOM.audio.duration) DOM.progFill.style.width = `${(DOM.audio.currentTime / DOM.audio.duration) * 100}%`;
+        });
+
+        // 自然曲终，推进到下一阶
+        DOM.audio.addEventListener('ended', () => { loadStage(currentStage + 1); });
+
+    </script>
+</body>
+</html>
